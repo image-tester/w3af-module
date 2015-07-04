@@ -23,7 +23,7 @@ import unittest
 
 from w3af.core.data.url.HTTPResponse import HTTPResponse
 from w3af.core.data.url.HTTPRequest import HTTPRequest
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.dc.headers import Headers
 from w3af.core.controllers.misc.temp_dir import create_temp_dir
 from w3af.plugins.mangle.sed import sed
@@ -92,3 +92,5 @@ class TestSed(unittest.TestCase):
         
         value, _ = mod_request.get_headers().iget('content-type')
         self.assertEqual(value, 'text/xml')
+
+        self.assertIs(mod_request, request)

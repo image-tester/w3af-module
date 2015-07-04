@@ -23,14 +23,12 @@ import unittest
 from nose.plugins.attrib import attr
 
 import w3af.core.data.kb.knowledge_base as kb
-
 from w3af.core.controllers.ci.moth import get_moth_http
 from w3af.core.data.url.HTTPResponse import HTTPResponse
 from w3af.core.data.request.fuzzable_request import FuzzableRequest
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.dc.headers import Headers
 from w3af.core.controllers.misc.temp_dir import create_temp_dir
-
 from w3af.plugins.tests.helper import PluginTest, PluginConfig
 from w3af.plugins.grep.cross_domain_js import cross_domain_js
 
@@ -128,7 +126,7 @@ class TestCrossDomainJSRaw(unittest.TestCase):
                         u' the potentially insecure "cdn.akamai-wannabe.net"' \
                         u' third party site. This practice is not recommended' \
                         u' because it delegates the security of the site to' \
-                        u' an external entity. The first ten vulnerable URLs' \
+                        u' an external entity. The first two vulnerable URLs' \
                         u' are:\n - http://www.w3af.com/2\n' \
                         u' - http://www.w3af.com/1\n'
 

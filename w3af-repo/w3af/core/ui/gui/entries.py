@@ -26,9 +26,9 @@ from w3af.core.ui.gui import helpers
 from w3af.core.ui.gui.constants import W3AF_ICON
 from w3af.core.ui.gui.user_help.open_help import open_help
 
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.options.preferences import Preferences
-from w3af.core.data.parsers.sgml import SGMLParser
+from w3af.core.data.parsers.doc.sgml import SGMLParser
 from w3af.core.controllers.exceptions import BaseFrameworkException
 
 
@@ -701,6 +701,7 @@ class RememberingWindow(gtk.Window):
             self.winconfig[self.id_size] = self.get_size()
             self.winconfig[self.id_position] = self.get_position()
         except ValueError:
+            # https://github.com/andresriancho/w3af/issues/8890
             pass
 
         return False
@@ -904,10 +905,17 @@ class _RememberingPane(object):
                 self.signal = self.connect("expose-event", self.exposed)
 
     def move_handle(self, widg, what):
-        """Adjust the record every time the handle is moved."""
+        """
+        Adjust the record every time the handle is moved.
+        """
         if what.name == "position-set":
             pos = self.get_position()
-            self.winconfig[self.widgname] = pos
+
+            try:
+                self.winconfig[self.widgname] = pos
+            except ValueError:
+                # https://github.com/andresriancho/w3af/issues/8890
+                pass
 
     def exposed(self, area, event):
         """Adjust the handle to the remembered position.

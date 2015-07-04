@@ -19,6 +19,8 @@ along with w3af; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 """
+from urllib import quote_plus
+
 import w3af.core.controllers.output_manager as om
 
 from w3af.core.controllers.plugins.auth_plugin import AuthPlugin
@@ -26,10 +28,15 @@ from w3af.core.controllers.exceptions import BaseFrameworkException
 
 from w3af.core.data.options.opt_factory import opt_factory
 from w3af.core.data.options.option_list import OptionList
+from w3af.core.data.url.handlers.redirect import GET_HEAD_CODES
 
 
 class detailed(AuthPlugin):
-    """Detailed authentication plugin."""
+    """
+    Detailed authentication plugin.
+    """
+
+    MAX_REDIRECTS = 10
 
     def __init__(self):
         AuthPlugin.__init__(self)
@@ -44,6 +51,8 @@ class detailed(AuthPlugin):
         self.check_url = 'http://host.tld/'
         self.check_string = ''
         self._login_error = True
+        self.follow_redirects = False
+        self.url_encode_params = True
 
     def login(self):
         """
@@ -56,15 +65,47 @@ class detailed(AuthPlugin):
         data = self._get_data_from_format()
 
         try:
+            # Send the auth HTTP request
             functor = getattr(self._uri_opener, self.method)
-            functor(self.auth_url, data)
+            response = functor(self.auth_url, data)
 
+            redirect_count = 0
+
+            # follow redirects if the feature is enabled
+            while self.follow_redirects and redirect_count < self.MAX_REDIRECTS:
+                
+                if response.get_code() not in GET_HEAD_CODES:
+                    # no redirect received, continue
+                    break
+
+                # Avoid endless loops
+                redirect_count += 1
+
+                response_headers = response.get_headers()
+                location_header_value, _ = response_headers.iget('location')
+                uri_header_value, _ = response_headers.iget('uri')
+                redirect_url = location_header_value or uri_header_value
+
+                redirect_url = response.get_url().url_join(redirect_url)
+
+                msg = 'auth.detailed was redirected to URL: "%s"'
+                om.out.debug(msg % redirect_url)
+                
+                # on HTTP redirect we can only follow up with GET
+                response = self._uri_opener.GET(redirect_url)
+
+            if redirect_count == self.MAX_REDIRECTS:
+                msg = 'auth.detailed seems to have entered an endless HTTP' \
+                      ' redirect loop with %s redirects, the last URL was %s'
+                raise Exception(msg % (redirect_count, redirect_url))
+
+            # check if we're logged in
             if not self.is_logged():
-                raise Exception("Can't login into web application as %s/%s"
-                                % (self.username, self.password))
+                msg = "Can't login into web application as %s/%s"
+                raise Exception(msg % (self.username, self.password))
             else:
-                om.out.debug('Login success for %s/%s' % (
-                    self.username, self.password))
+                om.out.debug('Login success for %s/%s' % (self.username,
+                                                          self.password))
                 return True
         except Exception, e:
             if self._login_error:
@@ -79,15 +120,20 @@ class detailed(AuthPlugin):
         information that was provided by the user and needs to be transmitted to
         the remote web application.
         """
+        trans = quote_plus if self.url_encode_params else lambda x: x
+
         result = self.data_format
-        result = result.replace('%u', self.username_field)
-        result = result.replace('%U', self.username)
-        result = result.replace('%p', self.password_field)
-        result = result.replace('%P', self.password)
+        result = result.replace('%u', trans(self.username_field))
+        result = result.replace('%U', trans(self.username))
+        result = result.replace('%p', trans(self.password_field))
+        result = result.replace('%P', trans(self.password))
+
         return result
 
     def logout(self):
-        """User login."""
+        """
+        User logout.
+        """
         return None
 
     def is_logged(self):
@@ -158,10 +204,21 @@ class detailed(AuthPlugin):
              '    - %p for the password parameter name value\n'
              '    - %P for the password value\n'),
 
+            ('follow_redirects',
+             self.follow_redirects,
+             'boolean',
+             'Follow HTTP redirects in multi-stage authentication flows'),
+
             ('method',
              self.method,
              'string',
              'The HTTP method to use'),
+
+            ('url_encode_params',
+             self.url_encode_params,
+             'boolean',
+             'URL-encode configured parameters before applying them to the'
+             '"data_format".'),
         ]
 
         ol = OptionList()
@@ -188,9 +245,11 @@ class detailed(AuthPlugin):
         self.method = options_list['method'].get_value()
         self.auth_url = options_list['auth_url'].get_value()
         self.check_url = options_list['check_url'].get_value()
+        self.follow_redirects = options_list['follow_redirects'].get_value()
+        self.url_encode_params = options_list['url_encode_params'].get_value()
 
         for o in options_list:
-            if not o.get_value():
+            if o.get_value() == '':
                 msg = "All parameters are required and can't be empty."
                 raise BaseFrameworkException(msg)
 
@@ -199,9 +258,9 @@ class detailed(AuthPlugin):
         :return: A DETAILED description of the plugin functions and features.
         """
         return """
-        This authentication plugin can login to web application with more
-        detailed and complex authentication schemas where the generic plugin
-        does not work.
+        This authentication plugin can login to web applications with more
+        complex authentication schemas where the auth.generic plugin falls
+        short.
 
         These configurable parameters exist:
             - username
@@ -213,4 +272,8 @@ class detailed(AuthPlugin):
             - method
             - check_url
             - check_string
+            - follow_redirects
+
+        Detailed descriptions for each configurable parameter are available in
+        the plugin configuration menu.
         """

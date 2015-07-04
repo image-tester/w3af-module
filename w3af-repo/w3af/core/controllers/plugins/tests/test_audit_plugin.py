@@ -30,10 +30,9 @@ from w3af.core.data.url.tests.test_xurllib import TimeoutTCPHandler
 from w3af.core.data.url.tests.helpers.upper_daemon import UpperDaemon
 from w3af.core.data.kb.knowledge_base import kb
 from w3af.core.data.request.fuzzable_request import FuzzableRequest
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.controllers.ci.moth import get_moth_http
 from w3af.core.controllers.w3afCore import w3afCore
-
 from w3af.plugins.tests.helper import PluginTest, MockResponse
 
 
@@ -85,7 +84,8 @@ class TestAuditPlugin(unittest.TestCase):
         freq = FuzzableRequest(url)
 
         plugin_inst = self.w3af.plugins.get_plugin_inst('audit', 'sqli')
-        plugin_inst._uri_opener.settings.set_timeout(1)
+        plugin_inst._uri_opener.settings.set_configured_timeout(1)
+        plugin_inst._uri_opener.clear_timeout()
 
         # We expect the server to timeout and the response to be a 204
         resp = plugin_inst.get_original_response(freq)
@@ -116,7 +116,7 @@ class TestAuditPlugin(unittest.TestCase):
 
         mod = 'w3af.core.controllers.plugins.audit_plugin.%s'
 
-        mock_plugin_timeout = 1
+        mock_plugin_timeout = 2
         msg = '[timeout] The "%s" plugin took more than %s seconds to'\
               ' complete the analysis of "%s", killing it!'
 

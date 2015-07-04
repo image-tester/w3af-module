@@ -24,29 +24,28 @@ import os
 import re
 import unittest
 import urllib2
-import httpretty
 import tempfile
 import pprint
 import time
-
 from functools import wraps
+
+import httpretty
 from nose.plugins.skip import SkipTest
 from nose.plugins.attrib import attr
 
 import w3af.core.data.kb.knowledge_base as kb
 import w3af.core.controllers.output_manager as om
-
 from w3af.core.controllers.w3afCore import w3afCore
 from w3af.core.controllers.misc.homeDir import W3AF_LOCAL_PATH
 from w3af.core.controllers.misc.decorators import retry
-
 from w3af.core.data.fuzzer.utils import rand_alnum
 from w3af.core.data.options.opt_factory import opt_factory
 from w3af.core.data.options.option_types import URL_LIST
 from w3af.core.data.options.option_list import OptionList
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.kb.read_shell import ReadShell
 from w3af.core.data.kb.info_set import InfoSet
+
 
 os.chdir(W3AF_LOCAL_PATH)
 RE_COMPILE_TYPE = type(re.compile(''))
@@ -120,6 +119,9 @@ class PluginTest(unittest.TestCase):
                 info.get_desc()
 
     def assertAllVulnNamesEqual(self, vuln_name, vulns):
+        if not vulns:
+            self.assertTrue(False, 'No vulnerabilities found to match')
+
         for vuln in vulns:
             self.assertEqual(vuln.get_name(), vuln_name)
 
@@ -390,6 +392,7 @@ class PluginConfig(object):
 
 class ReadExploitTest(PluginTest):
     def _exploit_vuln(self, vuln_to_exploit_id, exploit_plugin):
+        self.w3afcore.uri_opener.set_exploit_mode(True)
         plugin = self.w3afcore.plugins.get_plugin_inst('attack', exploit_plugin)
 
         self.assertTrue(plugin.can_exploit(vuln_to_exploit_id))

@@ -23,26 +23,24 @@ from __future__ import with_statement
 
 import socket
 import BaseHTTPServer
-
 from functools import partial
 
 import w3af.core.controllers.output_manager as om
 import w3af.core.data.constants.severity as severity
 import w3af.core.controllers.daemons.webserver as webserver
 import w3af.core.data.constants.ports as ports
-
 from w3af.core.controllers.plugins.audit_plugin import AuditPlugin
 from w3af.core.controllers.misc.get_local_ip import get_local_ip
 from w3af.core.controllers.misc.is_private_site import is_private_site
 from w3af.core.controllers.exceptions import BaseFrameworkException
-
 from w3af.core.data.options.opt_factory import opt_factory
 from w3af.core.data.options.option_types import STRING, PORT, BOOL
 from w3af.core.data.options.option_list import OptionList
 from w3af.core.data.fuzzer.fuzzer import create_mutants
 from w3af.core.data.fuzzer.utils import rand_alnum
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.kb.vuln import Vuln
+
 
 CONFIG_OK = 'Ok'
 
@@ -238,14 +236,16 @@ class rfi(AuditPlugin):
                 # always the same HTTP response body
                 webroot = '.'
                 webserver.start_webserver(self._listen_address,
-                                          self._listen_port, webroot,
+                                          self._listen_port,
+                                          webroot,
                                           RFIWebHandler)
 
                 # Perform the real work
                 self._test_inclusion(freq, rfi_data, orig_response)
             except Exception, e:
-                om.out.error('An error occurred while running local webserver:'
-                             ' "%s"' % e)
+                msg = 'An error occurred while running local web server for' \
+                      ' the remote file inclusion (rfi) plugin: "%s"'
+                om.out.error(msg % e)
 
     def _w3af_site_test_inclusion(self, freq, orig_response):
         """

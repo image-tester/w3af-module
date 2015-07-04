@@ -38,10 +38,10 @@ from w3af.core.ui.console.bug_report import bug_report_menu
 from w3af.core.ui.console.util import mapDict
 from w3af.core.ui.console.tables import table
 
-from w3af.core.controllers.exceptions import BaseFrameworkException, ScanMustStopException
 from w3af.core.controllers.misc.get_w3af_version import get_w3af_version
 from w3af.core.controllers.misc_settings import MiscSettings
-
+from w3af.core.controllers.exceptions import (BaseFrameworkException,
+                                              ScanMustStopException)
 
 
 class rootMenu(menu):
@@ -49,6 +49,8 @@ class rootMenu(menu):
     Main menu
     :author: Alexander Berezhnoy (alexander.berezhnoy |at| gmail.com)
     """
+    # Wait at most 20 seconds for the core to start the scan
+    MAX_WAIT_FOR_START = 20
 
     def __init__(self, name, console, core, parent=None):
         menu.__init__(self, name, console, core, parent)
@@ -78,11 +80,11 @@ class rootMenu(menu):
         # Check if the console output plugin is enabled or not, and warn.
         output_plugins = self._w3af.plugins.get_enabled_plugins('output')
         if 'console' not in output_plugins:
-            msg = "\nWarning: You disabled the console output plugin. If you"\
-                  " start a new scan, the discovered vulnerabilities won\'t be"\
-                  " printed to the console, we advise you to enable at least"\
-                  " one output plugin in order to be able to actually see the"\
-                  " the scan output."
+            msg = ("\nWarning: You disabled the console output plugin. If you"
+                   " start a new scan, the discovered vulnerabilities won\'t be"
+                   " printed to the console, we advise you to enable at least"
+                   " one output plugin in order to be able to actually see the"
+                   " the scan output.")
             print msg
 
         # Note that I'm NOT starting this in a new multiprocess Process
@@ -95,14 +97,31 @@ class rootMenu(menu):
         self._scan_thread.start()
         
         # let the core thread start
-        time.sleep(1)
-        
-        try:
-            if self._w3af.status.get_status() != 'Not running.':
-                self.show_progress_on_request()
-        except KeyboardInterrupt:
-            om.out.console('User pressed Ctrl+C, stopping scan.')
+        scan_started = self.wait_for_start()
+        if not scan_started:
+            om.out.console('The scan failed to start.')
             self._w3af.stop()
+            return
+
+        try:
+            self.show_progress_on_request()
+        except KeyboardInterrupt:
+            self.handle_scan_stop()
+
+    def wait_for_start(self):
+        delay = 0.1
+
+        for _ in xrange(int(self.MAX_WAIT_FOR_START / delay)):
+            if self._w3af.status.is_running():
+                return True
+
+            time.sleep(delay)
+
+        return False
+
+    def handle_scan_stop(self, *args):
+        om.out.console('User pressed Ctrl+C, stopping scan.')
+        self._w3af.stop()
 
     def _cmd_cleanup(self, params):
         """
@@ -129,6 +148,14 @@ class rootMenu(menu):
         except Exception:
             self._w3af.stop()
             raise
+        finally:
+            # All plugins are removed from the configuration/memory after a scan
+            # finishes. At least for now it's by design and it generates an
+            # usability bug where the user gets a strange message saying he
+            # disabled the console output, so we re-enable it
+            #
+            # https://github.com/andresriancho/w3af/issues/8114
+            self._w3af.plugins.set_plugins(['console'], 'output')
 
     def show_progress_on_request(self):
         """
@@ -137,32 +164,30 @@ class rootMenu(menu):
         while self._w3af.status.is_running():
 
             # Define some variables...
-            rfds = []
-            wfds = []
-            efds = []
-            hitted_enter = False
+            user_press_enter = False
 
             # TODO: This if is terrible! I need to remove it!
             # read from sys.stdin with a 0.5 second timeout
             if sys.platform != 'win32':
                 # linux
-                rfds, wfds, efds = select.select([sys.stdin], [], [], 0.5)
-                if rfds:
-                    if len(sys.stdin.readline()):
-                        hitted_enter = True
+                try:
+                    rfds, wfds, efds = select.select([sys.stdin], [], [], 0.5)
+                except select.error:
+                    continue
+                else:
+                    if rfds:
+                        if len(sys.stdin.readline()):
+                            user_press_enter = True
             else:
                 # windows
                 import msvcrt
                 time.sleep(0.3)
                 if msvcrt.kbhit():
                     if term.read(1) in ['\n', '\r', '\r\n', '\n\r']:
-                        hitted_enter = True
+                        user_press_enter = True
 
             # If something was written to sys.stdin, read it
-            if hitted_enter:
-
-                # change back to the previous state
-                hitted_enter = False
+            if user_press_enter:
 
                 # Get the information and print it to the user
                 status_information_str = self._w3af.status.get_long_status()

@@ -64,7 +64,6 @@ def retry(tries, delay=1, backoff=2, exc_class=None, err_msg='', log_msg=None):
                     is raised. If no value is passed the string representation
                     of the current exception is used.
     """
-
     if backoff <= 1:
         raise ValueError("'backoff' must be greater than 1")
 
@@ -129,7 +128,7 @@ class memoized(object):
     If called later with the same arguments, the cached value is returned
     (not reevaluated).
     """
-    def __init__(self, func, lru_size=100):
+    def __init__(self, func, lru_size=10):
         self.func = func
         self.cache = SynchronizedLRUDict(lru_size)
 

@@ -19,21 +19,19 @@ along with w3af; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 """
-import copy
 import re
+import copy
 import httplib
-import threading
 import urllib2
-
+import threading
 from itertools import imap
 
 import w3af.core.controllers.output_manager as om
 import w3af.core.data.parsers.parser_cache as parser_cache
-
 from w3af.core.controllers.exceptions import BaseFrameworkException
 from w3af.core.data.misc.encoding import smart_unicode, ESCAPED_CHAR
 from w3af.core.data.constants.encodings import DEFAULT_ENCODING
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.dc.headers import Headers
 from w3af.core.controllers.misc.decorators import memoized
 
@@ -59,6 +57,26 @@ class HTTPResponse(object):
     DOC_TYPE_PDF = 'DOC_TYPE_PDF'
     DOC_TYPE_IMAGE = 'DOC_TYPE_IMAGE'
     DOC_TYPE_OTHER = 'DOC_TYPE_OTHER'
+
+    __slots__ = ('_code',
+                 '_charset',
+                 '_headers',
+                 '_body',
+                 '_raw_body',
+                 '_content_type',
+                 '_dom',
+                 'id',
+                 '_from_cache',
+                 '_info',
+                 '_realurl',
+                 '_uri',
+                 '_redirected_url',
+                 '_redirected_uri',
+                 '_msg',
+                 '_time',
+                 '_alias',
+                 '_doc_type',
+                 '_body_lock')
 
     def __init__(self, code, read, headers, geturl, original_url,
                  msg='OK', _id=None, time=DEFAULT_WAIT_TIME, alias=None,
@@ -118,7 +136,7 @@ class HTTPResponse(object):
         self._redirected_uri = geturl.uri2url()
 
         # Set the rest
-        self._msg = msg
+        self._msg = smart_unicode(msg)
         self._time = time
         self._alias = alias
         self._doc_type = None
@@ -263,18 +281,6 @@ class HTTPResponse(object):
 
     body = property(get_body, set_body)
 
-    def get_dom(self):
-        """
-        Just a shortcut to get the dom (if any)
-        :return: A DOM instance from lxml
-        """
-        parser = self.get_parser()
-        if parser is not None:
-            return parser.get_dom()
-
-        # No DOM for this response
-        return None
-
     def get_clear_text_body(self):
         """
         Just a shortcut to get the clear text body
@@ -383,7 +389,6 @@ class HTTPResponse(object):
         if self._doc_type is None:
             self._doc_type = HTTPResponse.DOC_TYPE_OTHER
 
-
     headers = property(get_headers, set_headers)
 
     @memoized
@@ -396,9 +401,7 @@ class HTTPResponse(object):
 
         The only thing that changes is the header name.
         """
-        regular_headers = self.headers.iteritems()
-        lcase_headers = dict((k.lower(), v) for k, v in regular_headers)
-        return Headers(lcase_headers.items())
+        return Headers([(k.lower(), v) for k, v in self.headers.iteritems()])
 
     def set_url(self, url):
         """
@@ -420,6 +423,9 @@ class HTTPResponse(object):
 
     def get_url(self):
         return self._realurl
+
+    def get_host(self):
+        return self.get_url().get_domain()
 
     def set_uri(self, uri):
         """
@@ -613,29 +619,19 @@ class HTTPResponse(object):
 
     def dump_response_head(self):
         """
-        :return: A string with:
+        :return: A byte-string, as we would send to the wire, containing:
+
             HTTP/1.1 /login.html 200
             Header1: Value1
             Header2: Value2
+
         """
-        # Adding some extreme exception logging to be able to better debug
-        # https://github.com/andresriancho/w3af/issues/3661
         status_line = self.get_status_line()
         dumped_headers = self.dump_headers()
 
-        try:
-            dump_head = "%s%s" % (status_line, dumped_headers)
-        except UnicodeDecodeError, ude:
-            msg = 'UnicodeDecodeError found at dump_response_head(). Original'\
-                  ' exception was: "%s". The response charset is: "%s", the'\
-                  ' content-type: "%s", the status_line is "%r" and the' \
-                  ' dumped_headers are: "%r".'
+        dump_head = '%s%s' % (status_line, dumped_headers)
 
-            args = (ude, self.charset, self.content_type, status_line,
-                    dumped_headers)
-            raise Exception(msg % args)
-
-        if type(dump_head) is unicode:
+        if isinstance(dump_head, unicode):
             dump_head = dump_head.encode(self.charset)
 
         return dump_head
@@ -664,10 +660,10 @@ class HTTPResponse(object):
         return copy.deepcopy(self)
 
     def __getstate__(self):
-        state = self.__dict__.copy()
+        state = {k: getattr(self, k) for k in self.__slots__}
         state.pop('_body_lock')
         return state
     
     def __setstate__(self, state):
-        self.__dict__ = state
+        [setattr(self, k, v) for k, v in state.iteritems()]
         self._body_lock = threading.RLock()

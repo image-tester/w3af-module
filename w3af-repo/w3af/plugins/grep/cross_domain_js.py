@@ -21,19 +21,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 """
 import os
 
-from lxml import etree
-
 import w3af.core.controllers.output_manager as om
 
 from w3af import ROOT_PATH
 from w3af.core.controllers.plugins.grep_plugin import GrepPlugin
+from w3af.core.data.parsers.mp_document_parser import mp_doc_parser
 from w3af.core.data.kb.info import Info
 from w3af.core.data.kb.info_set import InfoSet
 from w3af.core.data.options.opt_factory import opt_factory
 from w3af.core.data.options.option_types import INPUT_FILE
 from w3af.core.data.options.option_list import OptionList
-
-SCRIPT_SRC_XPATH = ".//script[@src]"
 
 
 class cross_domain_js(GrepPlugin):
@@ -53,7 +50,6 @@ class cross_domain_js(GrepPlugin):
                                             'secure-js-sources.txt')
 
         # Internal variables
-        self._script_src_xpath = etree.XPath(SCRIPT_SRC_XPATH)
         self._secure_js_domains = []
         self._load_secure_js_file(self._secure_js_file)
 
@@ -68,22 +64,13 @@ class cross_domain_js(GrepPlugin):
         """
         if not response.is_text_or_html():
             return
-        
-        dom = response.get_dom()
 
-        # In some strange cases, we fail to normalize the document
-        if dom is None:
-            return
-        
-        # Loop through script inputs tags
-        for script_src_tag in self._script_src_xpath(dom):
+        for tag in mp_doc_parser.get_tags_by_filter(response, ('script',)):
+            script_src = tag.attrib.get('src', None)
 
-            # This should be always False due to the XPATH we're using
-            # but you never know...
-            if not 'src' in script_src_tag.attrib:
+            if script_src is None:
                 continue
 
-            script_src = script_src_tag.attrib['src']
             try:
                 script_full_url = response.get_url().url_join(script_src)
             except ValueError:
@@ -92,9 +79,9 @@ class cross_domain_js(GrepPlugin):
                 continue
 
             # More analysis methods might be added here later
-            self._analyze_domain(response, script_full_url, script_src_tag)
+            self._analyze_domain(response, script_full_url, tag)
 
-    def _analyze_domain(self, response, script_full_url, script_src_tag):
+    def _analyze_domain(self, response, script_full_url, script_tag):
         """
         Checks if the domain is the same, or if it's considered secure.
         """
@@ -104,11 +91,17 @@ class cross_domain_js(GrepPlugin):
         if script_domain != response.get_url().get_domain():
 
             for secure_domain in self._secure_js_domains:
-                if script_domain.endswith(secure_domain):
+                # We do a "in" because the secure js domains list contains
+                # entries such as ".google." which should be match. This is to
+                # take into account things like ".google.com.br" without having
+                # to list all of them.
+                #
+                # Not the best, could raise some false negatives, but... bleh!
+                if secure_domain in script_domain:
                     # It's a third party that we trust
                     return
 
-            to_highlight = etree.tostring(script_src_tag)
+            to_highlight = script_tag.attrib.get('src')
             desc = 'The URL: "%s" has a script tag with a source that points' \
                    ' to a third party site ("%s"). This practice is not' \
                    ' recommended, the security of the current site is being' \
@@ -180,7 +173,8 @@ class CrossDomainInfoSet(InfoSet):
         ' script tag which includes JavaScript source from the potentially'
         ' insecure "{{ domain }}" third party site. This practice is not'
         ' recommended because it delegates the security of the site to an'
-        ' external entity. The first ten vulnerable URLs are:\n'
+        ' external entity. The first {{ uris|sample_count }} vulnerable URLs'
+        ' are:\n'
         ''
         '{% for url in uris[:10] %}'
         ' - {{ url }}\n'

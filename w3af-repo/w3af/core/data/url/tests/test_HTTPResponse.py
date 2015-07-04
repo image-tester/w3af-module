@@ -21,16 +21,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 """
 import unittest
 import cPickle
-import msgpack
-
 from random import choice
 
+import msgpack
 from nose.plugins.attrib import attr
 
 from w3af.core.data.url.HTTPResponse import HTTPResponse, DEFAULT_CHARSET
 from w3af.core.data.misc.encoding import smart_unicode, ESCAPED_CHAR
-from w3af.core.data.parsers.url import URL
+from w3af.core.data.parsers.doc.url import URL
 from w3af.core.data.dc.headers import Headers
+
 
 TEST_RESPONSES = {
     'hebrew': (u'ולהכיר טוב יותר את המוסכמות, האופי', 'Windows-1255'),
@@ -185,12 +185,12 @@ class TestHTTPResponse(unittest.TestCase):
         loaded_resp = HTTPResponse.from_dict(loaded_dict)
         
         self.assertEqual(orig_resp, loaded_resp)
-        
-        orig_resp.__dict__.pop('_body_lock')
-        loaded_resp.__dict__.pop('_body_lock')
-        
-        self.assertEqual(orig_resp.__dict__.values(),
-                         loaded_resp.__dict__.values())
+
+        cmp_attrs = list(orig_resp.__slots__)
+        cmp_attrs.remove('_body_lock')
+
+        self.assertEqual({k: getattr(orig_resp, k) for k in cmp_attrs},
+                         {k: getattr(loaded_resp, k) for k in cmp_attrs})
     
     def test_from_dict_encodings(self):
         for body, charset in TEST_RESPONSES.values():
@@ -231,3 +231,17 @@ class TestHTTPResponse(unittest.TestCase):
         expected_dump = 'HTTP/1.1 200 OK\r\nContent-Type: \xc3\xb3\r\n'
 
         self.assertEqual(resp.dump_response_head(), expected_dump)
+
+    def test_dump_response_head_5416(self):
+        """
+        :see: https://github.com/andresriancho/w3af/issues/5416
+        """
+        url = URL('http://w3af.com')
+        headers = Headers()
+        msg = 'D\xe9plac\xe9 Temporairement'
+        resp = HTTPResponse(200, '', headers, url, url, msg=msg)
+
+        expected_dump = u'HTTP/1.1 200 Déplacé Temporairement\r\n'.encode('utf8')
+
+        self.assertEqual(resp.dump_response_head(), expected_dump)
+

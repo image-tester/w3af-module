@@ -43,6 +43,7 @@ import Queue
 import itertools
 import collections
 import time
+import cPickle
 
 from multiprocessing import Process, cpu_count, TimeoutError
 from multiprocessing.util import Finalize, debug
@@ -61,12 +62,14 @@ TERMINATE = 2
 
 job_counter = itertools.count()
 
+
 def mapstar(args):
     return map(*args)
 
 #
 # Code run by worker processes
 #
+
 
 class MaybeEncodingError(Exception):
     """Wraps possible unpickleable errors, so they can be
@@ -83,6 +86,17 @@ class MaybeEncodingError(Exception):
 
     def __repr__(self):
         return "<MaybeEncodingError: %s>" % str(self)
+
+
+class DetailedMaybeEncodingError(MaybeEncodingError):
+    def __init__(self, exc, value, attribute):
+        self.attribute = str(attribute)
+        super(DetailedMaybeEncodingError, self).__init__(exc, value)
+
+    def __str__(self):
+        msg = "Error sending result: '%s'. Reason: '%s'. Conflicting attr: '%s'"
+        args = (self.value, self.exc, self.attribute)
+        return msg % args
 
 
 def worker(inqueue, outqueue, initializer=None, initargs=(), maxtasks=None):
@@ -113,20 +127,63 @@ def worker(inqueue, outqueue, initializer=None, initargs=(), maxtasks=None):
             result = (True, func(*args, **kwds))
         except Exception, e:
             result = (False, e)
+
         try:
             put((job, i, result))
         except Exception as e:
-            wrapped = MaybeEncodingError(e, result[1])
-            debug("Possible encoding error while sending result: %s" % (
-                wrapped))
+            wrapped = create_detailed_pickling_error(e, result[1])
             put((job, i, (False, wrapped)))
         completed += 1
     debug('worker exiting after %d tasks' % completed)
 
+
+def create_detailed_pickling_error(exception, instance):
+    """
+    MaybeEncodingError - PicklingError: Can't pickle dictproxy #8748
+
+    :param instance: The instance we failed to encode
+    :return: We return the MaybeEncodingError, we include lots of information
+             that allow me to debug what's going wrong.
+    """
+    attribute = None
+
+    def can_pickle(data):
+        try:
+            cPickle.dumps(v)
+        except:
+            return False
+        else:
+            return True
+
+    if hasattr(instance, '__dict__'):
+        # Objects have dicts with all the attributes
+        for k, v in instance.__dict__.iteritems():
+            if not can_pickle(v):
+                attribute = k
+                break
+
+    elif isinstance(instance, dict):
+        # Similar to the above but we don't have __dict__
+        for k, v in instance.iteritems():
+            if not can_pickle(v):
+                attribute = k
+                break
+
+    elif isinstance(instance, (tuple, list)):
+        # Use enumerate to name the items in the list
+        for i, v in enumerate(instance):
+            if not can_pickle(v):
+                attribute = 'index-%s' % i
+                break
+
+    wrapped = DetailedMaybeEncodingError(exception, instance, attribute)
+    debug("Possible encoding error while sending result: %s" % wrapped)
+    return wrapped
+
+
 #
 # Class representing a process pool
 #
-
 class Pool(object):
     '''
     Class which supports an async version of the `apply()` builtin
@@ -230,9 +287,9 @@ class Pool(object):
             self._repopulate_pool()
 
     def _setup_queues(self):
-        from multiprocessing.queues import SimpleQueue
-        self._inqueue = SimpleQueue()
-        self._outqueue = SimpleQueue()
+        from .queues import SimpleQueueWithSize
+        self._inqueue = SimpleQueueWithSize()
+        self._outqueue = SimpleQueueWithSize()
         self._quick_put = self._inqueue._writer.send
         self._quick_get = self._outqueue._reader.recv
 
@@ -501,7 +558,11 @@ class Pool(object):
             debug('terminating workers')
             for p in pool:
                 if p.exitcode is None:
-                    p.terminate()
+                    try:
+                        p.terminate()
+                    except AttributeError:
+                        # https://github.com/andresriancho/w3af/issues/9361
+                        continue
 
         debug('joining task handler')
         if threading.current_thread() is not task_handler:
